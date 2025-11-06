@@ -1,8 +1,10 @@
-const mongoose = require('mongoose');
+// models/recording.js
+var mongoose = require('mongoose');
+var db = mongoose.connection;
 
-const RecordingSchema = new mongoose.Schema({
-  zip: { type: Number, required: true },
-  airQuality: { type: Number, required: true }
+var Recording = db.model("Recording", {
+  zip:        { type: Number },
+  airQuality: { type: Number }
 });
 
-module.exports = mongoose.model('Recording', RecordingSchema);
+module.exports = Recording;
