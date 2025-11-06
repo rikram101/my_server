@@ -3,8 +3,8 @@ var router = express.Router();
 var Recording = require('../models/recording');
 
 // GET /lab/status?zip=XXXXX
-router.get('/status', async function(req, res, next) {
-  var zip = req.query.zip;
+router.get('/status', async function(req, res) {
+  var zip = (req.query.zip || '').trim();
   var errormsg = {"error" : "a zip code is required."};
 
   // validate presence and basic format (5 digits)
@@ -13,7 +13,7 @@ router.get('/status', async function(req, res, next) {
   }
 
   try {
-    // Use aggregation to compute average in the database
+    // Compute average in DB
     var result = await Recording.aggregate([
       { $match: { zip: Number(zip) } },
       { $group: { _id: null, avgAQ: { $avg: '$airQuality' } } }
@@ -23,16 +23,15 @@ router.get('/status', async function(req, res, next) {
       return res.status(400).json({"error" : "Zip does not exist in the database."});
     }
 
-    var avg = result[0].avgAQ;
-    var avgTrunc = avg.toFixed(2);
-    return res.status(200).json(avgTrunc);
+    var avgTrunc = Number(result[0].avgAQ).toFixed(2);
+    return res.status(200).json(avgTrunc); // returned alone, per spec
   } catch (err) {
-    return next(err);
+    return res.status(500).json({ error: "Server error." });
   }
 });
 
 // POST /lab/register
-router.post('/register', async function(req, res, next) {
+router.post('/register', async function(req, res) {
   var zip = req.body.zip;
   var airQuality = req.body.airQuality;
   var errormsg = {"error" : "zip and airQuality are required."};
@@ -42,12 +41,17 @@ router.post('/register', async function(req, res, next) {
   }
 
   try {
-    // coerce numeric values
-    var entry = { zip: Number(zip), airQuality: Number(airQuality) };
-    await Recording.create(entry);
-    return res.status(201).json({"response" : "Data recorded."});
+    // coerce & validate numeric
+    var z = Number(zip);
+    var aq = Number(airQuality);
+    if (!Number.isFinite(z) || !Number.isFinite(aq)) {
+      return res.status(400).json(errormsg);
+    }
+
+    await Recording.create({ zip: z, airQuality: aq });
+    return res.status(201).json({ "response" : "Data recorded." });
   } catch (err) {
-    return next(err);
+    return res.status(500).json({ error: "Server error." });
   }
 });
 
