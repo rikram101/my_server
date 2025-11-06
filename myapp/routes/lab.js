@@ -1,24 +1,6 @@
 var express = require('express');
 var router = express.Router();
-var path = require('path');
-var fs = require('fs').promises;
-
-var DATA_PATH = path.join(__dirname, '..', 'data.json');
-
-async function readData() {
-  try {
-    var content = await fs.readFile(DATA_PATH, 'utf8');
-    if (!content) return [];
-    return JSON.parse(content);
-  } catch (err) {
-    // If file doesn't exist or is invalid, treat as empty array
-    return [];
-  }
-}
-
-async function writeData(data) {
-  await fs.writeFile(DATA_PATH, JSON.stringify(data, null, 2), 'utf8');
-}
+var Recording = require('../models/recording');
 
 // GET /lab/status?zip=XXXXX
 router.get('/status', async function(req, res, next) {
@@ -30,26 +12,23 @@ router.get('/status', async function(req, res, next) {
     return res.status(400).json(errormsg);
   }
 
-  var data = await readData();
-  var matches = data.filter(function(entry) {
-    return String(entry.zip) === String(zip);
-  });
+  try {
+    // Use aggregation to compute average in the database
+    var result = await Recording.aggregate([
+      { $match: { zip: Number(zip) } },
+      { $group: { _id: null, avgAQ: { $avg: '$airQuality' } } }
+    ]);
 
-  if (!matches || matches.length === 0) {
-    return res.status(400).json({"error" : "Zip does not exist in the database."});
+    if (!result || result.length === 0) {
+      return res.status(400).json({"error" : "Zip does not exist in the database."});
+    }
+
+    var avg = result[0].avgAQ;
+    var avgTrunc = avg.toFixed(2);
+    return res.status(200).json(avgTrunc);
+  } catch (err) {
+    return next(err);
   }
-
-  var sum = 0;
-  matches.forEach(function(m) {
-    var v = parseFloat(m.airQuality);
-    if (!isNaN(v)) sum += v;
-  });
-  var avg = sum / matches.length;
-  // Truncate to two decimals using toFixed()
-  var avgTrunc = avg.toFixed(2);
-
-  // send ONLY the average value
-  return res.status(200).json(avgTrunc);
 });
 
 // POST /lab/register
@@ -62,13 +41,14 @@ router.post('/register', async function(req, res, next) {
     return res.status(400).json(errormsg);
   }
 
-  // read current data, append new entry and write back
-  var data = await readData();
-  var entry = { zip: zip, airQuality: Number(airQuality) };
-  data.push(entry);
-  await writeData(data);
-
-  return res.status(201).json({"response" : "Data recorded."});
+  try {
+    // coerce numeric values
+    var entry = { zip: Number(zip), airQuality: Number(airQuality) };
+    await Recording.create(entry);
+    return res.status(201).json({"response" : "Data recorded."});
+  } catch (err) {
+    return next(err);
+  }
 });
 
 module.exports = router;

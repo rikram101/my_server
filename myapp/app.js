@@ -3,12 +3,50 @@ var express = require('express');
 var path = require('path');
 var cookieParser = require('cookie-parser');
 var logger = require('morgan');
+var mongoose = require('mongoose');
+var fs = require('fs').promises;
 
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
+// labRouter will be mounted after DB connection/migration finishes
+var labRouter = require('./routes/lab');
 var labRouter = require('./routes/lab');
 
 var app = express();
+
+// --- MongoDB / Mongoose setup & migration ---
+// Use MONGO_URL env var if provided, otherwise default local DB
+var mongoUrl = process.env.MONGO_URL || 'mongodb://127.0.0.1:27017/myappdb';
+mongoose.connect(mongoUrl, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(async function() {
+    console.log('MongoDB connected');
+    // Try to migrate any existing data.json entries into MongoDB
+    try {
+      var Recording = require('./models/recording');
+      var dataPath = path.join(__dirname, 'data.json');
+      var content = '[]';
+      try { content = await fs.readFile(dataPath, 'utf8'); } catch (e) { /* file might not exist */ }
+      var arr = [];
+      try { arr = content ? JSON.parse(content) : []; } catch(e) { arr = []; }
+      if (Array.isArray(arr) && arr.length > 0) {
+        var count = await Recording.countDocuments();
+        if (count === 0) {
+          var toInsert = arr.map(function(e) { return { zip: Number(e.zip), airQuality: Number(e.airQuality) }; });
+          await Recording.insertMany(toInsert);
+          // clear data.json after successful migration
+          await fs.writeFile(dataPath, JSON.stringify([], null, 2), 'utf8');
+          console.log('Migrated data.json to MongoDB and cleared file.');
+        } else {
+          console.log('Recording collection not empty — skipping migration.');
+        }
+      }
+    } catch (err) {
+      console.error('Migration error:', err && err.message ? err.message : err);
+    }
+  })
+  .catch(function(err) {
+    console.error('MongoDB connection error:', err && err.message ? err.message : err);
+  });
 
 // view engine setup
 app.set('views', path.join(__dirname, 'views'));
